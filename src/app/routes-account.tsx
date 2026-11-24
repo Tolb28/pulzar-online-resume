@@ -3,7 +3,7 @@ import { deleteCookie, setCookie } from 'hono/cookie';
 import { normalizeIsic } from '../config/schools';
 import { isTemplateId } from '../config/templates';
 import { isTierId, TIERS } from '../config/tiers';
-import { coerceDesign, hardCapProblem } from '../cv/sanitize';
+import { coerceDesign, hardCapProblem, renderableDoc } from '../cv/sanitize';
 import { randomId, slugify, slugProblem } from '../cv/text';
 import type { CvDoc, Lang, TierId } from '../cv/types';
 import { validateDoc } from '../cv/validate';
@@ -13,7 +13,7 @@ import { consumeToken, createSession, destroySession, findOrCreateAccount, issue
 import { hashPin } from '../platform/crypto';
 import { all, one, run } from '../platform/db';
 import { mails } from '../platform/mail';
-import { checkImage, stripJpegMetadata, type MediaKind } from '../platform/media';
+import { checkImage, stripJpegMetadata, stripPngMetadata, type MediaKind } from '../platform/media';
 import { hit } from '../platform/ratelimit';
 import { statsFor } from '../platform/stats';
 import { completePayment, markStudent, quote, requestIsic, requestSchoolEmail, startCheckout, studentEligible, type PaymentRow } from '../services/billing';
@@ -32,6 +32,7 @@ import {
   resume,
   saveBody,
   saveProfile,
+  slugAvailable,
   updateCv,
   type CvActor,
   type CvRow,
@@ -128,7 +129,8 @@ export async function mediaPost(c: Ctx, t: EditorTarget): Promise<Response> {
   let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
   const check = checkImage(kind, bytes);
   if (!check.ok) return back(section, `${kind}-${check.problem}`);
-  if (check.info.format === 'jpeg') bytes = stripJpegMetadata(bytes);
+  // Metadata (EXIF location, text chunks) goes, whatever the browser did.
+  bytes = check.info.format === 'jpeg' ? stripJpegMetadata(bytes) : stripPngMetadata(bytes);
   const ext = check.info.format === 'png' ? 'png' : 'jpg';
   const key = `cv/${t.row.id}/${kind}-${randomId()}.${ext}`;
   await deps.media.put(key, bytes, { httpMetadata: { contentType: `image/${check.info.format}` } });
@@ -147,7 +149,7 @@ export async function mediaPost(c: Ctx, t: EditorTarget): Promise<Response> {
 
 export async function previewHtml(c: Ctx, row: CvRow): Promise<Response> {
   const deps = c.get('deps');
-  const doc = await draftDoc(deps.db, row);
+  const doc = renderableDoc(await draftDoc(deps.db, row));
   const q = c.req.query('lang');
   const lang: Lang = (q === 'cs' || q === 'en') && doc.langs.includes(q) ? q : doc.langs[0]!;
   c.header('Content-Security-Policy', publicCsp(c.get('nonce')));
@@ -171,7 +173,7 @@ export async function previewHtml(c: Ctx, row: CvRow): Promise<Response> {
 
 export async function previewPdf(c: Ctx, row: CvRow): Promise<Response> {
   const deps = c.get('deps');
-  const doc = await draftDoc(deps.db, row);
+  const doc = renderableDoc(await draftDoc(deps.db, row));
   const q = c.req.query('lang');
   const lang: Lang = (q === 'cs' || q === 'en') && doc.langs.includes(q) ? q : doc.langs[0]!;
   let photo: Uint8Array | null = null;
@@ -285,7 +287,7 @@ export function registerAccount(app: Hono<AppEnv>): void {
     const again = (error: string) => page(c, 'Nový životopis', <NewCvView name={name} slug={slug} tier={tier} error={error} />, { status: 400 });
     const problem = slugProblem(slug);
     if (problem) return again(problem);
-    if (await one(deps.db, 'SELECT 1 FROM cvs WHERE slug = ?', slug)) return again('Tuto adresu už někdo má. Zkuste třeba přidat druhé jméno nebo obor.');
+    if (!(await slugAvailable(deps.db, slug, account.id, deps.now()))) return again('Tuto adresu už někdo má. Zkuste třeba přidat druhé jméno nebo obor.');
     await createCv(deps, account.id, {
       slug,
       tier,
@@ -402,7 +404,8 @@ export function registerAccount(app: Hono<AppEnv>): void {
     const r = await resume(deps, row, holderActor(account));
     if (r === 'online') return c.redirect('/ucet?ok=obnoveno', 303);
     if (r === 'unpaid') {
-      const checkout = await startCheckout(deps, account, row);
+      // Paid from "Obnovit": once paid, the CV comes back online too.
+      const checkout = await startCheckout(deps, account, row, { resume: true });
       return c.redirect(checkout.url, 303);
     }
     return c.redirect('/ucet/zverejnit', 303);
@@ -471,7 +474,7 @@ export function registerAccount(app: Hono<AppEnv>): void {
     if (slug === row.slug) return c.redirect('/ucet/nastaveni', 303);
     const problem = slugProblem(slug);
     if (problem) return settings(c, { slugError: problem }, 400);
-    if (await one(deps.db, 'SELECT 1 FROM cvs WHERE slug = ?', slug)) return settings(c, { slugError: 'Tuto adresu už někdo má.' }, 400);
+    if (!(await slugAvailable(deps.db, slug, account.id, deps.now()))) return settings(c, { slugError: 'Tuto adresu už někdo má.' }, 400);
     await updateCv(deps, row, { slug }, holderActor(account));
     return c.redirect('/ucet/nastaveni?ok=ulozeno', 303);
   });
@@ -507,6 +510,10 @@ export function registerAccount(app: Hono<AppEnv>): void {
       account: { email: account.email, createdAt: new Date(account.created_at).toISOString(), student: account.student_verified_at ? account.student_method : null },
       cv: row ? { slug: row.slug, tier: row.tier, visibility: row.visibility, status: row.status, paidUntil: row.paid_until, draft: await draftDoc(deps.db, row), published: row.published ? JSON.parse(row.published) : null } : null,
       payments: await all(deps.db, 'SELECT kind, tier, student, amount_czk, status, created_at, paid_at FROM payments WHERE account_id = ?', account.id),
+      studentRequests: (await all<{ method: string; value: string; status: string; created_at: number }>(deps.db, 'SELECT method, value, status, created_at FROM student_requests WHERE account_id = ?', account.id)).map((r) => ({
+        ...r,
+        value: `${r.value.slice(0, 4)}…${r.value.slice(-3)}`,
+      })),
       statistics: row ? await all(deps.db, 'SELECT day, views, pdf_downloads, contact_reveals FROM stats_daily WHERE cv_id = ? ORDER BY day', row.id) : [],
     };
     return c.body(JSON.stringify(data, null, 2), 200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="pulzar-cv-data.json"', 'Cache-Control': 'no-store' });
@@ -543,7 +550,8 @@ export function registerAccount(app: Hono<AppEnv>): void {
     const t = await consumeToken(deps.db, 'student', c.req.param('token'), deps.now());
     if (!t) return errorPage(c, 410, 'Odkaz už neplatí.');
     const domain = t.data ? (JSON.parse(t.data) as { domain: string }).domain : '';
-    await markStudent(deps, account.id, 'school_email', domain, holderActor(account));
+    const r = await markStudent(deps, account.id, 'school_email', domain, holderActor(account), t.email ?? undefined);
+    if (r === 'mailbox_used') return student(c, 'Tahle školní adresa už ověřila jiný účet. Pokud jde o omyl, napište nám.', 409);
     return c.redirect('/ucet/zverejnit?ok=student', 303);
   });
   app.post('/ucet/student/isic', async (c) => {

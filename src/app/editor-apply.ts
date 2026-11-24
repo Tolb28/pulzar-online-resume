@@ -86,8 +86,17 @@ function byId<T extends { id: string }>(list: T[], id: unknown, i: number): T | 
   return list.find((x) => x.id === id) ?? list[i];
 }
 
+/**
+ * Bullets match the stored ones by position. A bullet whose posted languages are all empty was
+ * cleared to delete it (as the editor says), even if it has a translation the form did not show.
+ */
 function bullets(parsed: unknown, existing: L10n[] | undefined): L10n[] {
-  return arr(parsed).map((b, j) => fill(b, existing?.[j]));
+  return arr(parsed).flatMap((b, j) => {
+    const o = obj(b);
+    const posted = (['cs', 'en'] as const).filter((l) => l in o);
+    if (posted.length && posted.every((l) => !str(o[l]).trim())) return [];
+    return [fill(b, existing?.[j])];
+  });
 }
 
 const emptyL = (): L10n => ({ cs: '', en: '' });
@@ -194,9 +203,19 @@ export function applySection(key: string, doc: CvDoc, form: Obj, op: string | nu
         const tags = obj(go.tags);
         const cs = split(tags.cs);
         const en = split(tags.en);
-        const n = Math.max(cs?.length ?? ex?.tags.length ?? 0, en?.length ?? (cs ? 0 : (ex?.tags.length ?? 0)));
-        const list: L10n[] = [];
-        for (let j = 0; j < n; j++) list.push({ cs: cs ? (cs[j] ?? '') : (ex?.tags[j]?.cs ?? ''), en: en ? (en[j] ?? '') : (ex?.tags[j]?.en ?? '') });
+        const old = ex?.tags ?? [];
+        let list: L10n[];
+        if (cs && en) {
+          // Both languages shown: the holder pairs them line by line.
+          list = Array.from({ length: Math.max(cs.length, en.length) }, (_, j) => ({ cs: cs[j] ?? '', en: en[j] ?? '' }));
+        } else if (cs) {
+          // One language shown: keep each tag's hidden translation by its text, not by position.
+          list = cs.map((t) => ({ cs: t, en: old.find((o) => o.cs === t)?.en ?? '' }));
+        } else if (en) {
+          list = en.map((t) => ({ cs: old.find((o) => o.en === t)?.cs ?? '', en: t }));
+        } else {
+          list = old;
+        }
         return { id: str(go.id) || randomId(), name: fill(go.name, ex?.name), tags: list };
       });
       if (!grouped && groups.length > 1) groups = [{ ...groups[0]!, name: emptyL(), tags: groups.flatMap((g) => g.tags) }];

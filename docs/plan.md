@@ -146,7 +146,15 @@ Studio site (other repo): the sales page and `/prace/` tile at "Beta" go with CV
 15. **"Dosud" is explicit.** An empty end date without "dosud" ticked is flagged, not read as "dosud".
 16. **Sign-in sessions last 30 days.** Holders come back rarely; a new magic link is cheap.
 17. **Images are re-encoded in the browser** before upload (size, and no EXIF); the server checks the bytes
-    again and strips metadata from JPEGs.
+    again and strips metadata from JPEGs and PNGs.
+18. **The tier that was paid for is the tier the CV gets.** A tier switched while a checkout is open does not
+    carry over (§11, #1).
+19. **Only the CV's own languages are shown.** Text kept from a language the CV no longer uses stays in the
+    draft (nothing is cut) but never reaches the page, the PDF or the published snapshot (§11, #3).
+20. **Old addresses redirect.** After an address change, the old one redirects to the new one; a released
+    address (changed or deleted) is reserved for a year so nobody else can take over links in old applications.
+21. **Deletion.** The holder's own deletion removes the CV, profile, images, PDFs, ISIC requests, tokens and
+    imports and anonymises their e-mail in the audit log; deletion for inactivity also removes the account.
 
 ---
 
@@ -241,7 +249,7 @@ New:
 
 ## 10. Testing
 
-96 Vitest tests in 7 files, plus a browser smoke test. All pass on this branch (`npm test`, `npm run typecheck`).
+115 Vitest tests in 9 files, plus a browser smoke test. All pass on this branch (`npm test`, `npm run typecheck`).
 
 - **Unit:** validation, sanitising, text helpers, colours (`test/validate.test.ts`).
 - **PDF acceptance (CV-3):** `pdftotext` reading order for every template and language, the max-content
@@ -260,7 +268,32 @@ New:
 
 ---
 
-## 11. Studio site work (PRD §12) – for the studio repo
+## 11. Independent review
+
+A separate review of the app, platform and services (authorization, privacy, tokens, CSRF, payments, data
+loss, SQL) found no cross-holder access, admin bypass, admin publish path, CSRF gap, open redirect or SQL
+injection, and 11 bugs plus 4 smaller issues. All are fixed, each with a regression test in
+`test/review-fixes.test.ts`:
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | Switching tier during an open checkout gave Profi/Na míru for the Základ price | The paid tier (`payments.tier`) is applied at completion |
+| 2 | An e-mail typed as a link URL (`https://jana@…`) or a `wa.me/<own phone>` link was published | Link and project URLs get the same contact checks as text |
+| 3 | Text in a language the CV no longer uses could be shown (unvalidated) | Snapshots and previews keep only the CV's languages |
+| 4 | One failing e-mail stopped the daily job; CVs could be deleted without a warning | Steps and CVs are isolated; deletion only ≥ 7 days after a delivered warning |
+| 5 | A payment was marked paid before its effect, so a failed e-mail lost the extension on retry | Payment status and paid period change in one transaction; e-mails and auto-publish are best-effort |
+| 6 | A PIN cookie survived a PIN change | The cookie is bound to the current PIN |
+| 7 | Hidden-language skill tags were re-paired by position | Matched by the visible tag's text |
+| 8 | Paying from "Obnovit" left a paused CV paused | Such a renewal resumes the CV |
+| 9 | PNG uploads kept their text/EXIF chunks without the browser's re-encode | PNG metadata stripped on the server |
+| 10 | Deletion left ISIC numbers, tokens and the holder's e-mail in the log; export missed ISIC | Deleted or anonymised; ISIC masked after the decision and in the export |
+| 11 | One school mailbox could verify any number of accounts | One mailbox, one account (hash of the address) |
+| – | Console mailer in production would log sign-in links | Production fails closed without a mail provider |
+| – | Images of PIN-protected CVs were publicly cacheable | `Cache-Control: private` |
+| – | Correct PINs counted towards the PIN limit | Only failures count |
+| – | A changed or deleted address could be taken by someone else at once | Redirect plus a year's reservation (decision 20) |
+
+## 12. Studio site work (PRD §12) – for the studio repo
 
 A content draft for the sales page, ready to port, is in [sales-page.md](sales-page.md).
 

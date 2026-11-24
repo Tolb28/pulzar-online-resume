@@ -80,6 +80,36 @@ export function stripJpegMetadata(b: Uint8Array): Uint8Array {
   return res;
 }
 
+/**
+ * Keep only the PNG chunks needed to draw the image (and its colours); drop text, EXIF and
+ * time chunks (tEXt, zTXt, iTXt, eXIf, tIME and any other ancillary chunk). Chunks are copied
+ * whole, so their CRCs stay valid.
+ */
+const PNG_KEEP = new Set(['IHDR', 'PLTE', 'IDAT', 'IEND', 'tRNS', 'gAMA', 'cHRM', 'sRGB', 'iCCP', 'sBIT', 'bKGD', 'pHYs']);
+
+export function stripPngMetadata(b: Uint8Array): Uint8Array {
+  if (b.length < 8 || b[0] !== 0x89 || b[1] !== 0x50) return b;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const out: Uint8Array[] = [b.subarray(0, 8)];
+  let i = 8;
+  while (i + 12 <= b.length) {
+    const len = dv.getUint32(i);
+    const type = String.fromCharCode(b[i + 4]!, b[i + 5]!, b[i + 6]!, b[i + 7]!);
+    const end = i + 12 + len;
+    if (end > b.length) break;
+    if (PNG_KEEP.has(type)) out.push(b.subarray(i, end));
+    i = end;
+    if (type === 'IEND') break;
+  }
+  const res = new Uint8Array(out.reduce((n, s) => n + s.length, 0));
+  let o = 0;
+  for (const s of out) {
+    res.set(s, o);
+    o += s.length;
+  }
+  return res;
+}
+
 export type MediaProblem = 'format' | 'size' | 'dimensions';
 
 export function mediaMessage(kind: MediaKind, problem: MediaProblem): string {

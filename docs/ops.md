@@ -112,7 +112,8 @@ This also regenerates `src/generated/charset.ts`, the characters the editor acce
    `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Production refuses to start with
    the dev payment provider. If the platform uses another provider, implement `PaymentProvider` in
    `src/platform/payments.ts`.
-7. **E-mail (A6, N4).** Verify the sending domain with the provider. Another provider: implement `Mailer` in
+7. **E-mail (A6, N4).** Verify the sending domain with the provider. Production refuses to start without a mail
+   provider (otherwise sign-in links would end up in the logs). Another provider: implement `Mailer` in
    `src/platform/mail.ts`.
 8. **Deploy.**
 
@@ -172,10 +173,12 @@ Every run is in the audit log (`cron.daily`) with its counts.
   records, and daily view counts without IPs or cookies.
 - **Photos:** EXIF and other metadata are stripped in the browser and again on the server.
 - **Deletion:** the holder deletes from **Nastavení** (typing the address to confirm), or the retention job does.
-  Deletion removes the CV row, the profile block, every R2 object under `cv/<id>/`, statistics and domains. The
-  audit log keeps the action, not the content.
+  Deletion removes the CV row, the profile block, every R2 object under `cv/<id>/`, statistics, domains, ISIC
+  requests, tokens and imports, and removes the holder's e-mail from the audit log (the actions stay). Deletion
+  for inactivity also removes the account and its sessions. Payments stay for accounting; they hold no e-mail.
+  The address stays reserved for a year, so nobody else can take over links in old applications.
 - **Export:** `/ucet/export.json` returns everything about the account (GDPR access and portability).
 - **Backups:** D1 has Time Travel (30 days on the paid plan). R2 objects are not versioned; deleted photos and
   PDFs are gone.
 - **Legal (L1, L2):** the /gdpr/ CV section and the terms are still to be written by the lawyer.
-  [plan.md](plan.md) §11 lists the facts they need.
+  [plan.md](plan.md) §12 lists the facts they need.

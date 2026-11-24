@@ -29,6 +29,8 @@ export function makeDeps(env: Env, overrides: DepsOverrides = {}): Deps {
       ? new StripePayments(env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, now)
       : new DevPayments());
   if (isProduction(env) && payments.id === 'dev') throw new Error('Production needs a real payment provider (PAYMENTS_PROVIDER).');
+  // Fail closed: in production the console mailer would put every sign-in link into the logs.
+  if (isProduction(env) && mailer instanceof ConsoleMailer) throw new Error('Production needs a real mail provider (MAIL_PROVIDER, RESEND_API_KEY).');
   const turnstile =
     overrides.turnstile ?? turnstileVerifier(env.TURNSTILE_SECRET_KEY, { devBypass: !isProduction(env) && env.TURNSTILE_SITE_KEY === 'dev', expectedAction: 'reveal' });
   return {

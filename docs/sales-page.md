@@ -74,6 +74,6 @@ anglicky, a vyplníme ho. Zveřejníte ho vy – bez vašeho kliknutí se nic ne
 - `ROUTES`: add the page.
 - `/prace/`: the tile goes from "Ve vývoji" to "Beta" with phase CV-a.
 - Ceník: one row linking here.
-- `/gdpr/`: the CV section (L1); [plan.md](plan.md) §11 lists the facts.
+- `/gdpr/`: the CV section (L1); [plan.md](plan.md) §12 lists the facts.
 - Channels (§11): give each its own `?src=` on the sign-up link. The CV records it on the account as
   `signup_src`, and every CV's footer links back here with `?src=cv-footer`.

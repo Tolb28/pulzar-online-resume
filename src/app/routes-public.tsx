@@ -1,8 +1,9 @@
 import type { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Lang } from '../cv/types';
-import { checkPin, signPass, verifyPass } from '../platform/crypto';
-import { hit } from '../platform/ratelimit';
+import { checkPin, sha256Hex, signPass, verifyPass } from '../platform/crypto';
+import { one } from '../platform/db';
+import { hit, peek } from '../platform/ratelimit';
 import { bump, isCountable, type StatField } from '../platform/stats';
 import { getCvById, getCvBySlug, mediaKeys, publicState, snapshotOf, type CvRow } from '../services/cvs';
 import { activeDomainFor } from '../services/domains';
@@ -34,12 +35,17 @@ function publicHeaders(c: Ctx, indexable: boolean): void {
   if (!indexable) c.header('X-Robots-Tag', 'noindex, nofollow, noarchive');
 }
 
+/** The PIN cookie is tied to the current PIN: changing the PIN revokes everyone's access. */
+async function pinPayload(row: CvRow): Promise<string> {
+  return `pin-${row.id}-${(await sha256Hex(row.pin_hash ?? '')).slice(0, 16)}`;
+}
+
 async function pinOk(c: Ctx, row: CvRow): Promise<boolean> {
   if (row.visibility !== 'pin') return true;
   if (isInsider(c, row)) return true;
   const deps = c.get('deps');
   const cookie = getCookie(c, `cvpin_${row.id}`);
-  return !!cookie && (await verifyPass(deps.env.SESSION_SECRET, cookie, `pin-${row.id}`, deps.now()));
+  return !!cookie && (await verifyPass(deps.env.SESSION_SECRET, cookie, await pinPayload(row), deps.now()));
 }
 
 function inactive(c: Ctx, lang: Lang): Response {
@@ -181,16 +187,23 @@ export async function servePin(c: Ctx, row: CvRow | null, base: string): Promise
   const lang: Lang = c.req.query('lang') === 'en' && snap.doc.langs.includes('en') ? 'en' : snap.doc.langs[0]!;
   const action = `${base}/pin${lang !== snap.doc.langs[0] ? `?lang=${lang}` : ''}`;
   publicHeaders(c, false);
+  // Only failed attempts count: 5 per visitor per 15 minutes, 50 per CV per day (a 4-digit PIN
+  // has 10 000 values). The per-CV limit can lock everyone out for a day – the price of making
+  // guessing from many addresses useless.
   const ip = clientIp(c) ?? 'unknown';
-  const perVisitor = await hit(deps.db, `pin:${row.id}:${ip}`, 5, 15 * 60_000, now);
-  const perCv = await hit(deps.db, `pin:${row.id}`, 50, 24 * 3_600_000, now);
-  if (!perVisitor.ok || !perCv.ok) return c.html(renderPinHtml(lang, c.get('nonce'), action, snap.doc.design.accent, 'locked'), 429);
+  const visitorKey = `pin:${row.id}:${ip}`;
+  const cvKey = `pin:${row.id}`;
+  if ((await peek(deps.db, visitorKey, now)) >= 5 || (await peek(deps.db, cvKey, now)) >= 50) {
+    return c.html(renderPinHtml(lang, c.get('nonce'), action, snap.doc.design.accent, 'locked'), 429);
+  }
   const form = await c.req.parseBody();
   const pin = typeof form.pin === 'string' ? form.pin.trim() : '';
   if (!/^\d{4,6}$/.test(pin) || !(await checkPin(pin, row.pin_hash))) {
+    await hit(deps.db, visitorKey, 5, 15 * 60_000, now);
+    await hit(deps.db, cvKey, 50, 24 * 3_600_000, now);
     return c.html(renderPinHtml(lang, c.get('nonce'), action, snap.doc.design.accent, 'wrong'), 401);
   }
-  setCookie(c, `cvpin_${row.id}`, await signPass(deps.env.SESSION_SECRET, `pin-${row.id}`, now + PIN_TTL), {
+  setCookie(c, `cvpin_${row.id}`, await signPass(deps.env.SESSION_SECRET, await pinPayload(row), now + PIN_TTL), {
     httpOnly: true,
     secure: new URL(c.req.url).protocol === 'https:',
     sameSite: 'Lax',
@@ -221,7 +234,8 @@ export async function serveMedia(c: Ctx, key: string, onlyCvId?: string): Promis
   return new Response(obj.body, {
     headers: {
       'Content-Type': obj.httpMetadata?.contentType ?? (key.endsWith('.png') ? 'image/png' : 'image/jpeg'),
-      'Cache-Control': insider ? 'private, no-store' : 'public, max-age=300',
+      // A PIN-protected CV's images must not sit in a shared cache.
+      'Cache-Control': insider ? 'private, no-store' : row.visibility === 'pin' ? 'private, max-age=300' : 'public, max-age=300',
       ETag: obj.httpEtag,
       'X-Content-Type-Options': 'nosniff',
       'Cross-Origin-Resource-Policy': 'same-site',
@@ -267,8 +281,21 @@ export function registerPublic(app: Hono<AppEnv>): void {
   app.get('/media/:key{.+}', (c) => serveMedia(c, c.req.param('key')));
 
   const bySlug = (c: Ctx) => getCvBySlug(c.get('deps').db, c.req.param('slug') ?? '');
-  app.on(['GET', 'HEAD'], '/:slug{[a-z0-9-]{3,50}}', async (c) => servePage(c, await bySlug(c), `/${c.req.param('slug')}`, undefined));
-  app.on(['GET', 'HEAD'], '/:slug{[a-z0-9-]{3,50}}/:lang{cs|en}', async (c) => servePage(c, await bySlug(c), `/${c.req.param('slug')}`, c.req.param('lang')));
+  /** An old address of a CV that changed its address redirects to the current one. */
+  const page = async (c: Ctx, lang: string | undefined) => {
+    const row = await bySlug(c);
+    if (!row) {
+      const moved = await one<{ slug: string }>(
+        c.get('deps').db,
+        'SELECT c.slug FROM slug_history h JOIN cvs c ON c.id = h.cv_id WHERE h.slug = ?',
+        c.req.param('slug') ?? '',
+      );
+      if (moved) return c.redirect(`/${moved.slug}${lang ? `/${lang}` : ''}`, 301);
+    }
+    return servePage(c, row, `/${c.req.param('slug')}`, lang);
+  };
+  app.on(['GET', 'HEAD'], '/:slug{[a-z0-9-]{3,50}}', (c) => page(c, undefined));
+  app.on(['GET', 'HEAD'], '/:slug{[a-z0-9-]{3,50}}/:lang{cs|en}', (c) => page(c, c.req.param('lang')));
   app.post('/:slug{[a-z0-9-]{3,50}}/kontakt', async (c) => serveContact(c, await bySlug(c)));
   app.post('/:slug{[a-z0-9-]{3,50}}/pdf', async (c) => servePdfPass(c, await bySlug(c), `/${c.req.param('slug')}`));
   app.get('/:slug{[a-z0-9-]{3,50}}/pdf', async (c) => servePdfFile(c, await bySlug(c)));

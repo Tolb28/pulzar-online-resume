@@ -1,6 +1,6 @@
 import { TIERS } from '../config/tiers';
 import { defaultDesign, emptyBody, emptyProfile, GRADUATE_ORDER } from '../cv/defaults';
-import { coerceBody, coerceDesign, coerceProfile } from '../cv/sanitize';
+import { coerceBody, coerceDesign, coerceProfile, renderableDoc } from '../cv/sanitize';
 import { randomId } from '../cv/text';
 import { BODY_SECTIONS, type CvBody, type CvDesign, type CvDoc, type Lang, type MediaRef, type ProfileBlock, type PublishedSnapshot, type TierId, type Visibility } from '../cv/types';
 import { errorsOf, validateDoc, type Issue } from '../cv/validate';
@@ -187,6 +187,11 @@ export async function updateCv(deps: Deps, row: CvRow, patch: SettingsPatch, act
   if (!sets.length) return;
   set('updated_at', now);
   await run(deps.db, `UPDATE cvs SET ${sets.join(', ')} WHERE id = ?`, ...vals, row.id);
+  if (patch.slug !== undefined && patch.slug !== row.slug) {
+    // The old address keeps working: it redirects to the new one.
+    await run(deps.db, 'INSERT OR REPLACE INTO slug_history (slug, cv_id, account_id, released_at) VALUES (?, ?, ?, ?)', row.slug, row.id, row.account_id, now);
+    await run(deps.db, 'DELETE FROM slug_history WHERE slug = ?', patch.slug);
+  }
   const logged = { ...patch, pinHash: patch.pinHash === undefined ? undefined : patch.pinHash ? 'set' : 'removed' };
   if (actor.role === 'admin' || patch.slug || patch.visibility || patch.tier) await audit(deps.db, now, actor, 'cv.settings', row.id, logged);
 }
@@ -223,8 +228,10 @@ export async function loadPhoto(deps: Deps, doc: CvDoc): Promise<Uint8Array | nu
 export async function publish(deps: Deps, row: CvRow, actor: CvActor): Promise<PublishResult> {
   if (actor.role !== 'holder' || actor.id !== row.account_id) return { ok: false, reason: 'not_owner' };
   const now = deps.now();
-  const doc = await draftDoc(deps.db, row);
-  const issues = validateDoc(doc);
+  const full = await draftDoc(deps.db, row);
+  const issues = validateDoc(full);
+  // The snapshot holds only what is shown: text in the CV's own languages.
+  const doc = renderableDoc(full);
   if (errorsOf(issues).length) return { ok: false, reason: 'issues', issues };
   if (!isPaid(row, now)) return { ok: false, reason: 'unpaid' };
   const photo = await loadPhoto(deps, doc);
@@ -305,7 +312,12 @@ export async function resume(deps: Deps, row: CvRow, actor: CvActor): Promise<'o
 
 // ---------- delete ----------
 
-export async function deleteCv(deps: Deps, row: CvRow, actor: Actor, reason: string): Promise<void> {
+/**
+ * Delete a CV and the personal data around it. The holder's own deletion keeps the account (they
+ * are signed in and may start again); deletion for inactivity removes the account too. Payments
+ * stay for accounting (no e-mail in them); the audit log keeps actions but not the holder's e-mail.
+ */
+export async function deleteCv(deps: Deps, row: CvRow, actor: Actor, reason: string, opts: { wholeAccount?: boolean } = {}): Promise<void> {
   const now = deps.now();
   let cursor: string | undefined;
   do {
@@ -315,18 +327,37 @@ export async function deleteCv(deps: Deps, row: CvRow, actor: Actor, reason: str
   } while (cursor);
   const profile = await getProfile(deps.db, row.account_id);
   if (profile.photo) await deps.media.delete(profile.photo.key);
-  await deps.db.batch([
+  const account = await one<{ email: string }>(deps.db, 'SELECT email FROM accounts WHERE id = ?', row.account_id);
+  const stmts = [
     deps.db.prepare('DELETE FROM media WHERE cv_id = ?').bind(row.id),
     deps.db.prepare('DELETE FROM domains WHERE cv_id = ?').bind(row.id),
     deps.db.prepare('DELETE FROM stats_daily WHERE cv_id = ?').bind(row.id),
     deps.db.prepare('DELETE FROM notifications WHERE cv_id = ?').bind(row.id),
     deps.db.prepare('DELETE FROM cvs WHERE id = ?').bind(row.id),
+    // The released address stays reserved for a year, so nobody takes over old links.
+    deps.db.prepare('INSERT OR REPLACE INTO slug_history (slug, cv_id, account_id, released_at) VALUES (?, NULL, ?, ?)').bind(row.slug, row.account_id, now),
+    deps.db.prepare('UPDATE slug_history SET cv_id = NULL WHERE cv_id = ?').bind(row.id),
     // A10: there is no card in this repo, so the profile block goes too. Once the card shares
     // this database, keep the profile when the account still has a card.
     deps.db.prepare('DELETE FROM profiles WHERE account_id = ?').bind(row.account_id),
     deps.db.prepare('DELETE FROM imports WHERE account_id = ?').bind(row.account_id),
-  ]);
-  await audit(deps.db, now, actor, 'cv.delete', row.id, { reason, slug: row.slug });
+    deps.db.prepare('DELETE FROM student_requests WHERE account_id = ?').bind(row.account_id),
+    deps.db.prepare('DELETE FROM tokens WHERE account_id = ? OR email = ?').bind(row.account_id, account?.email ?? ''),
+    deps.db.prepare('UPDATE audit_log SET actor_email = NULL WHERE actor = ?').bind(row.account_id),
+  ];
+  if (opts.wholeAccount) {
+    stmts.push(deps.db.prepare('DELETE FROM sessions WHERE account_id = ?').bind(row.account_id));
+    stmts.push(deps.db.prepare('DELETE FROM accounts WHERE id = ?').bind(row.account_id));
+  }
+  await deps.db.batch(stmts);
+  await audit(deps.db, now, actor.id === row.account_id ? { id: actor.id, email: null } : actor, 'cv.delete', row.id, { reason, wholeAccount: !!opts.wholeAccount });
+}
+
+/** A released address is reserved for a year (except for the account that released it). */
+export async function slugAvailable(db: D1Database, slug: string, accountId: string, now: number): Promise<boolean> {
+  if (await one(db, 'SELECT 1 FROM cvs WHERE slug = ?', slug)) return false;
+  const released = await one<{ account_id: string; released_at: number }>(db, 'SELECT account_id, released_at FROM slug_history WHERE slug = ?', slug);
+  return !released || released.account_id === accountId || released.released_at < now - 365 * DAY;
 }
 
 export const RETENTION = {

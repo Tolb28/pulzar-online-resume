@@ -462,7 +462,7 @@ export function SettingsView(p: { row: CvRow; langs: Lang[]; slugError?: string;
           <span>cv.pulzarstudio.cz/</span>
           <input name="slug" value={p.row.slug} required pattern="[a-z0-9-]{3,50}" />
         </div>
-        {p.row.published && <p class="help">Pozor: starý odkaz přestane fungovat. Kdo ho má, uvidí chybu.</p>}
+        {p.row.published && <p class="help">Starý odkaz bude dál fungovat a přesměruje na nový.</p>}
         <button class="btn small" type="submit">
           Změnit adresu
         </button>

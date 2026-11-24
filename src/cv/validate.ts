@@ -183,6 +183,31 @@ function checkText(ctx: Ctx, path: string, section: IssueSection, label: string,
   }
 }
 
+/** Links are public too: no e-mail (including "user@host" URLs) and not the holder's own phone. */
+function checkUrlContact(ctx: Ctx, path: string, section: IssueSection, label: string, url: string): void {
+  let decoded = url;
+  try {
+    decoded = decodeURIComponent(url);
+  } catch {
+    // keep the raw URL
+  }
+  let userinfo = false;
+  try {
+    const u = new URL(url);
+    userinfo = !!(u.username || u.password);
+  } catch {
+    // invalid URLs are reported elsewhere
+  }
+  if (userinfo || EMAIL_IN_TEXT.test(decoded) || /^mailto:/i.test(url) || (ctx.email && decoded.toLowerCase().includes(ctx.email.toLowerCase()))) {
+    add(ctx, { path, section, code: 'contact_in_text', severity: 'error', message: `${label}: odkaz obsahuje e-mailovou adresu. Kontakt patří do sekce Kontakt, kde ho chráníme před roboty.` });
+    return;
+  }
+  const digits = decoded.replace(/\D/g, '');
+  if (ctx.phoneDigits.length >= 9 && digits.includes(ctx.phoneDigits.slice(-9))) {
+    add(ctx, { path, section, code: 'contact_in_text', severity: 'error', message: `${label}: odkaz obsahuje vaše telefonní číslo (třeba odkaz na WhatsApp). Telefon patří do sekce Kontakt.` });
+  }
+}
+
 function checkL10n(
   ctx: Ctx,
   path: string,
@@ -336,6 +361,7 @@ export function validateDoc(doc: CvDoc): Issue[] {
       add(ctx, { path: `${path}.url`, section: 'header', code: 'invalid', severity: 'error', message: `${name}: adresa musí být webový odkaz (https://…).` });
       return;
     }
+    checkUrlContact(ctx, `${path}.url`, 'header', name, link.url);
     const host = new URL(link.url).hostname.toLowerCase();
     const want = LINK_HOSTS[link.kind];
     if (want && host !== want && !host.endsWith(`.${want}`)) {
@@ -400,6 +426,8 @@ export function validateDoc(doc: CvDoc): Issue[] {
     checkL10n(ctx, `${path}.text`, 'projects', `${label} – popis`, pr.text, L.projects.text);
     if (pr.url && (!isHttpUrl(pr.url) || charCount(pr.url) > L.projects.url)) {
       add(ctx, { path: `${path}.url`, section: 'projects', code: 'invalid', severity: 'error', message: `${label}: odkaz musí být webová adresa (https://…).` });
+    } else if (pr.url) {
+      checkUrlContact(ctx, `${path}.url`, 'projects', label, pr.url);
     }
     if (pr.image && !tier.projectImages) {
       add(ctx, {

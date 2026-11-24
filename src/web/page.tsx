@@ -100,6 +100,18 @@ function Paragraphs({ text }: { text: string }) {
   );
 }
 
+function Bullets({ items }: { items: string[] }) {
+  const shown = items.filter(Boolean);
+  if (!shown.length) return null;
+  return (
+    <ul>
+      {shown.map((t) => (
+        <li>{t}</li>
+      ))}
+    </ul>
+  );
+}
+
 function SectionBody({ doc, keyName, lang, mediaUrl }: { doc: CvDoc; keyName: BodySectionKey; lang: Lang; mediaUrl: (k: string) => string }) {
   const b = doc.body;
   switch (keyName) {
@@ -119,13 +131,7 @@ function SectionBody({ doc, keyName, lang, mediaUrl }: { doc: CvDoc; keyName: Bo
                 </div>
                 <p class="cv-date">{formatRange(e.from, e.to, lang)}</p>
               </header>
-              {e.bullets.length > 0 && (
-                <ul>
-                  {e.bullets.map((t) => (
-                    <li>{pick(t, lang)}</li>
-                  ))}
-                </ul>
-              )}
+              <Bullets items={e.bullets.map((t) => pick(t, lang))} />
             </article>
           ))}
         </>
@@ -142,13 +148,7 @@ function SectionBody({ doc, keyName, lang, mediaUrl }: { doc: CvDoc; keyName: Bo
                 </div>
                 <p class="cv-date">{formatRange(e.from, e.to, lang)}</p>
               </header>
-              {e.bullets.length > 0 && (
-                <ul>
-                  {e.bullets.map((t) => (
-                    <li>{pick(t, lang)}</li>
-                  ))}
-                </ul>
-              )}
+              <Bullets items={e.bullets.map((t) => pick(t, lang))} />
             </article>
           ))}
         </>
@@ -179,9 +179,13 @@ function SectionBody({ doc, keyName, lang, mediaUrl }: { doc: CvDoc; keyName: Bo
       if (!b.skills.grouped) {
         return (
           <ul class="cv-tags">
-            {groups.flatMap((g) => g.tags).map((t) => (
-              <li>{pick(t, lang)}</li>
-            ))}
+            {groups
+              .flatMap((g) => g.tags)
+              .map((t) => pick(t, lang))
+              .filter(Boolean)
+              .map((t) => (
+                <li>{t}</li>
+              ))}
           </ul>
         );
       }
@@ -191,9 +195,12 @@ function SectionBody({ doc, keyName, lang, mediaUrl }: { doc: CvDoc; keyName: Bo
             <div class="cv-group">
               {pick(g.name, lang) && <h3>{pick(g.name, lang)}</h3>}
               <ul class="cv-tags">
-                {g.tags.map((t) => (
-                  <li>{pick(t, lang)}</li>
-                ))}
+                {g.tags
+                  .map((t) => pick(t, lang))
+                  .filter(Boolean)
+                  .map((t) => (
+                    <li>{t}</li>
+                  ))}
               </ul>
             </div>
           ))}

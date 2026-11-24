@@ -390,7 +390,7 @@ function sectionBoxes(ctx: Ctx, doc: CvDoc, key: BodySectionKey): Box[] {
       });
       return out;
     case 'skills': {
-      const groups = b.skills.groups.filter((g) => g.tags.length);
+      const groups = b.skills.groups.map((g) => ({ ...g, tags: g.tags.filter((t) => pick(t, lang)) })).filter((g) => g.tags.length);
       if (b.skills.grouped) {
         groups.forEach((g, i) => {
           const name = pick(g.name, lang);

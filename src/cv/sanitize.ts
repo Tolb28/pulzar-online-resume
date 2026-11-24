@@ -11,6 +11,7 @@ import {
   type CefrLevel,
   type CvBody,
   type CvDesign,
+  type CvDoc,
   type HideableSectionKey,
   type L10n,
   type LinkKind,
@@ -175,3 +176,22 @@ export function hardCapProblem(profile: ProfileBlock, body: CvBody): string | nu
 }
 
 export { emptyL10n };
+
+const isL10n = (v: unknown): v is L10n =>
+  !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 2 && typeof (v as L10n).cs === 'string' && typeof (v as L10n).en === 'string';
+
+/** Blank every text in a language the CV does not use. */
+export function onlyLangs<T>(value: T, langs: readonly string[]): T {
+  if (isL10n(value)) return { cs: langs.includes('cs') ? value.cs : '', en: langs.includes('en') ? value.en : '' } as T;
+  if (Array.isArray(value)) return value.map((v) => onlyLangs(v, langs)) as T;
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, onlyLangs(v, langs)])) as T;
+  return value;
+}
+
+/**
+ * What may be shown: text in the CV's own languages only. Text kept from a language the CV no
+ * longer uses stays in the draft (nothing is cut) but is never rendered – it is not validated.
+ */
+export function renderableDoc(doc: CvDoc): CvDoc {
+  return { ...doc, profile: onlyLangs(doc.profile, doc.langs), body: onlyLangs(doc.body, doc.langs) };
+}
