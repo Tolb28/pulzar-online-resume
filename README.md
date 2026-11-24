@@ -6,6 +6,7 @@ The online CV (životopis) by Studio Pulzar: a personal link for LinkedIn and jo
 - **PRD:** [docs/prd/2026-11-24-online-cv-prd.md](docs/prd/2026-11-24-online-cv-prd.md)
 - **Implementation plan, requirement map, findings and open questions:** [docs/plan.md](docs/plan.md)
 - **Running, deploying and operating it:** [docs/ops.md](docs/ops.md)
+- **Sales page content (for the studio site, PRD §12):** [docs/sales-page.md](docs/sales-page.md)
 
 ## What it does
 

@@ -262,6 +262,8 @@ New:
 
 ## 11. Studio site work (PRD §12) – for the studio repo
 
+A content draft for the sales page, ready to port, is in [sales-page.md](sales-page.md).
+
 - Sales page: use a real published CV for the laptop shot and its PDF; prices from `PRICES` in
   `src/config/tiers.ts` (`tabular-nums`); FAQ starting with privacy (CV-4, CV-5, CV-6, retention in §5.11).
 - `/prace/` tile: "Ve vývoji", then "Beta" with CV-a.
