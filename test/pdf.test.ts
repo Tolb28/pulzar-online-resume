@@ -173,3 +173,25 @@ describe('CV-3 PDF layout polish', () => {
     }
   });
 });
+
+describe('CV-3 file size, worst case', () => {
+  it('stays within 500 kB with the largest photo the server accepts (300 kB) and every limit at its maximum', async () => {
+    const { MEDIA_LIMITS } = await import('../src/platform/media');
+    const target = MEDIA_LIMITS.photo.maxBytes;
+    // Pad the fixture JPEG with comment segments (pdf-lib embeds JPEG bytes as they are).
+    const parts: number[] = [...PHOTO.subarray(0, 2)];
+    let size = PHOTO.length;
+    while (size < target) {
+      const len = Math.min(65533, target - size - 4);
+      if (len < 1) break;
+      parts.push(0xff, 0xfe, ((len + 2) >> 8) & 255, (len + 2) & 255, ...new Array(len).fill(0x20));
+      size += len + 4;
+    }
+    const big = new Uint8Array([...parts, ...PHOTO.subarray(2)]);
+    expect(big.length).toBeGreaterThan(target - 8);
+    for (const template of TEMPLATE_IDS) {
+      const out = await renderPdf({ doc: maxDoc('profi', 'cs', template), lang: 'cs', photo: big });
+      expect(out.bytes.length, template).toBeLessThanOrEqual(500 * 1024);
+    }
+  });
+});

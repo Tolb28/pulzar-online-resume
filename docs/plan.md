@@ -143,6 +143,10 @@ Studio site (other repo): the sales page and `/prace/` tile at "Beta" go with CV
     the admin. See N1.
 14. **`Referrer-Policy: no-referrer`** on CV pages, so a link-only address does not leak to the sites it
     links to.
+15. **"Dosud" is explicit.** An empty end date without "dosud" ticked is flagged, not read as "dosud".
+16. **Sign-in sessions last 30 days.** Holders come back rarely; a new magic link is cheap.
+17. **Images are re-encoded in the browser** before upload (size, and no EXIF); the server checks the bytes
+    again and strips metadata from JPEGs.
 
 ---
 
@@ -166,14 +170,23 @@ realistic fixture is one page at 10 pt). **Owner decision (N2):** keep these bud
 tighter limit sets above, which meet the PRD's 2 and 3 pages.
 
 **F2 – E1, the PDF engine.** pdf-lib with fontkit runs inside the Worker: no browser, no extra service,
-no per-render fee. Rendering a CV takes tens of milliseconds of CPU in Node (as a proxy). It needs the
-Workers Paid plan for the CPU limit (the free plan's 10 ms is too little) – set `limits.cpu_ms`. Output:
-70–90 kB with a photo; fonts are embedded as subsets with ToUnicode maps, so text extracts with diacritics
-intact. Browser Rendering was not needed.
+no per-render fee. Measured in Node (same V8 engine): a typical CV renders in about 30 ms (median 29 ms), a
+Profi CV with every limit at its maximum in about 85 ms (median 83 ms, it tries denser settings until it fits).
+That needs the Workers Paid plan – the free plan allows 10 ms of CPU – with `limits.cpu_ms` set in
+`wrangler.toml`. The smoke test renders and downloads a PDF in workerd itself. Output: 70–90 kB with a photo;
+fonts are embedded as subsets with ToUnicode maps, so text extracts with diacritics intact. Browser Rendering was
+not needed.
 
 **F3 – Turnstile on the PDF download.** The download is a short POST that returns a signed, 10-minute pass
 and then a normal GET of the file, so it works on iOS Safari and shares one check with the contact reveal
 (one click for either, not two challenges).
+
+**F4 – Turnstile and own domains (CV-10).** The reveal runs Turnstile on the page's own host, so every own
+domain must be listed on the widget. A widget takes at most 10 hostnames on the Free plan (200 on Enterprise,
+which also offers "Any hostname"), and a Free account has at most 20 widgets
+([hostname management](https://developers.cloudflare.com/turnstile/additional-configuration/hostname-management/),
+[plans](https://developers.cloudflare.com/turnstile/plans/)). With the one site key this branch uses, that is
+about nine own domains. Decide before CV-b grows past that (N6).
 
 ---
 
@@ -222,10 +235,13 @@ New:
 | N3 | Payment provider and invoicing (the voucher service may already have one) | Owner | CV-a launch |
 | N4 | E-mail provider and sending domain | Owner | CV-a launch |
 | N5 | Are statistics counted for Základ too (for §8) but shown only in Profi? This branch counts all, shows Profi+ | Owner | – |
+| N6 | F4: own domains beyond ~9 – Turnstile Enterprise ("Any hostname"), one widget per 10 domains (needs a site key per domain), or run the check on `cv.pulzarstudio.cz` only | Owner + Engineering | CV-b at scale |
 
 ---
 
 ## 10. Testing
+
+96 Vitest tests in 7 files, plus a browser smoke test. All pass on this branch (`npm test`, `npm run typecheck`).
 
 - **Unit:** validation, sanitising, text helpers, colours (`test/validate.test.ts`).
 - **PDF acceptance (CV-3):** `pdftotext` reading order for every template and language, the max-content
@@ -236,8 +252,11 @@ New:
 - **App:** the Worker's Hono app runs in Node against an in-memory D1 (node:sqlite) and R2, covering sign-in,
   editing over limits, publishing, the reveal and PDF endpoints with Turnstile, pausing, payments, the student
   price, Na míru (including "the studio cannot publish"), domains, PIN rate limits, statistics and the cron jobs.
-- **Smoke:** `wrangler dev` (workerd) with Playwright: sign up, edit, pay (dev), publish, open the public
-  page, reveal the contact, download the PDF.
+- **Lifecycle:** reminders, expiry, renewal, the retention cycle and the privacy scan with a fake clock
+  (`test/lifecycle.test.ts`); LinkedIn import from a generated export ZIP (`test/import.test.ts`).
+- **Smoke:** `scripts/e2e-smoke.mjs` drives Chromium against `wrangler dev` (workerd, local D1/R2): sign in,
+  create a Profi CV, upload a photo through the browser resize, pay (dev), publish, open the page on a phone,
+  reveal the contact, download the PDF and check its text, switch to English, pause. Passed on this branch.
 
 ---
 
