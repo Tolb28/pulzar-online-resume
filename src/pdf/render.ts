@@ -45,7 +45,7 @@ export interface PdfInput {
 }
 
 export interface PdfOutput {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   pages: number;
   /** Index into PRESETS that was used (0 = most comfortable). */
   preset: number;
@@ -730,6 +730,7 @@ export async function renderPdf(input: PdfInput): Promise<PdfOutput> {
   pdf.setModificationDate(date);
   pdf.catalog.set(PDFName.of('PageLayout'), PDFName.of('OneColumn'));
 
-  const bytes = await pdf.save({ useObjectStreams: true });
+  // pdf-lib returns a fresh buffer.
+  const bytes = (await pdf.save({ useObjectStreams: true })) as Uint8Array<ArrayBuffer>;
   return { bytes, pages: flow.pages, preset: chosen, fits: flow.pages <= budget, filename: pdfFilename(name, lang) };
 }

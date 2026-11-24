@@ -52,7 +52,7 @@ export interface ExperienceItem {
   role: L10n;
   employer: string;
   from: YearMonth;
-  /** null = "dosud" (present) */
+  /** null = "dosud" (present); "" = not filled in yet */
   to: YearMonth | null;
   bullets: L10n[];
 }

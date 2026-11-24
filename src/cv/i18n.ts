@@ -140,6 +140,7 @@ export function formatYearMonth(ym: YearMonth): string {
 /** "03/2021 – dosud" with an en dash and non-breaking spaces around it. */
 export function formatRange(from: YearMonth, to: YearMonth | null, lang: Lang): string {
   const a = from ? formatYearMonth(from) : '';
+  if (to === '') return a ? `${a}\u00a0–` : '';
   const b = to ? formatYearMonth(to) : UI[lang]!.present!;
   if (!a) return b === UI[lang]!.present ? '' : b;
   return `${a} – ${b}`;

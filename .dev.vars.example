@@ -1,0 +1,12 @@
+# Copy to .dev.vars for `npm run dev` (http://localhost:8787). Values here override wrangler.toml.
+ENVIRONMENT=development
+CV_HOST=localhost
+BASE_URL=http://localhost:8787
+ADMIN_EMAILS=studio@pulzar.test
+# "dev" skips Turnstile locally; use Cloudflare's test keys to exercise the real widget:
+# site 1x00000000000000000000AA, secret 1x0000000000000000000000000000000AA
+TURNSTILE_SITE_KEY=dev
+TURNSTILE_SECRET_KEY=dev
+PAYMENTS_PROVIDER=dev
+MAIL_PROVIDER=console
+SESSION_SECRET=change-me-to-32-random-bytes-for-real-use

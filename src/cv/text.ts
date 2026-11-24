@@ -3,7 +3,7 @@ import type { Lang } from './types';
 
 /** Remove diacritics: "Nováková" → "Novakova". */
 export function stripDiacritics(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L').replace(/ß/g, 'ss');
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L').replace(/ß/g, 'ss');
 }
 
 /**
@@ -12,7 +12,7 @@ export function stripDiacritics(s: string): string {
  */
 export function normalizeText(s: unknown, multiline = false): string {
   if (typeof s !== 'string') return '';
-  let t = s.normalize('NFC').replace(/\r\n?/g, '\n').replace(/[​-‍⁠﻿­]/g, '');
+  let t = s.normalize('NFC').replace(/\r\n?/g, '\n').replace(/[\u200b-\u200d\u2060\ufeff\u00ad]/g, '');
   t = t.replace(/\t/g, ' ');
   if (multiline) {
     t = t
@@ -107,7 +107,7 @@ export function base64url(b: Uint8Array): string {
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export function fromBase64url(s: string): Uint8Array {
+export function fromBase64url(s: string): Uint8Array<ArrayBuffer> {
   const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
   const out = new Uint8Array(b.length);
   for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i);

@@ -35,7 +35,8 @@ export function l10n(x: unknown, multiline = false): L10n {
 const isEmpty = (t: L10n) => !t.cs && !t.en;
 const id = (x: unknown) => (typeof x === 'string' && /^[A-Za-z0-9_-]{4,32}$/.test(x) ? x : randomId());
 const ym = (x: unknown) => (typeof x === 'string' ? x.trim().slice(0, 7) : '');
-const toYm = (x: unknown) => (x === null || x === 'present' || x === '' || x === undefined ? null : ym(x) || null);
+/** null (or a missing value) means "dosud"; "" means not filled in yet (flagged by validation). */
+const toYm = (x: unknown) => (x === null || x === undefined || x === 'present' ? null : ym(x));
 
 function media(x: unknown): MediaRef | null {
   const o = obj(x);

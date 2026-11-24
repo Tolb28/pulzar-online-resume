@@ -160,9 +160,9 @@ describe('links', () => {
 
 describe('sanitizing input', () => {
   it('normalizes text without removing anything visible', () => {
-    expect(normalizeText('  Ahoj­svete​  \t tady ')).toBe('Ahojsvete tady');
+    expect(normalizeText('  Ahoj\u00adsvete\u200b  \t tady ')).toBe('Ahojsvete tady');
     expect(normalizeText('a\r\n\r\n\r\n\r\nb', true)).toBe('a\n\nb');
-    expect(normalizeText('Nováková')).toBe('Nováková');
+    expect(normalizeText('Nova\u0301kova\u0301')).toBe('Nováková');
   });
   it('fills in a missing or broken section order and drops unknown sections', () => {
     const body = coerceBody({ layout: { order: ['education', 'bogus', 'education'], hidden: ['contact', 'bogus'] } });

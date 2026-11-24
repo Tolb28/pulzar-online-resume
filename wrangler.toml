@@ -1,0 +1,55 @@
+# Pulzar CV – Cloudflare Worker (see docs/ops.md)
+name = "pulzar-cv"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# Minify the browser scripts (src/client → public/static) before dev and deploy.
+[build]
+command = "npm run build:client"
+
+# Web fonts, CSS and the two small scripts. Served before the Worker runs.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# The PDF fonts are imported as ArrayBuffers (src/pdf/font-data.ts).
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pulzar-cv"
+database_id = "00000000-0000-0000-0000-000000000000" # set after `wrangler d1 create pulzar-cv`
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "pulzar-cv-media"
+
+# Daily job: expiry reminders, expiry, retention (CV-8) and the privacy scan (§8).
+[triggers]
+crons = ["17 3 * * *"]
+
+# Rendering a PDF needs more than the free plan's 10 ms of CPU (docs/plan.md, F2).
+[limits]
+cpu_ms = 30000
+
+[observability]
+enabled = true
+
+[vars]
+ENVIRONMENT = "production"
+CV_HOST = "cv.pulzarstudio.cz"
+BASE_URL = "https://cv.pulzarstudio.cz"
+SALES_URL = "https://pulzarstudio.cz/zivotopis/"
+MAIL_FROM = "Pulzar CV <cv@pulzarstudio.cz>"
+ADMIN_EMAILS = ""
+TURNSTILE_SITE_KEY = ""
+PAYMENTS_PROVIDER = "stripe"
+MAIL_PROVIDER = "resend"
+# Secrets (wrangler secret put …): SESSION_SECRET, TURNSTILE_SECRET_KEY,
+# STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, RESEND_API_KEY
+
+routes = [{ pattern = "cv.pulzarstudio.cz", custom_domain = true }]

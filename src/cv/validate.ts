@@ -264,7 +264,9 @@ function checkRange(ctx: Ctx, path: string, section: IssueSection, label: string
   } else if (!isValidYearMonth(from)) {
     add(ctx, { path: `${path}.from`, section, code: 'invalid', severity: 'error', message: `${label}: datum „od“ zadejte jako měsíc a rok.` });
   }
-  if (to !== null && to !== '') {
+  if (to === '') {
+    add(ctx, { path: `${path}.to`, section, code: 'required', severity: 'error', message: `${label}: vyplňte, do kdy, nebo zaškrtněte „dosud“.` });
+  } else if (to !== null) {
     if (!isValidYearMonth(to)) {
       add(ctx, { path: `${path}.to`, section, code: 'invalid', severity: 'error', message: `${label}: datum „do“ zadejte jako měsíc a rok, nebo zvolte „dosud“.` });
     } else if (from && isValidYearMonth(from) && to < from) {
